@@ -57,17 +57,16 @@ const commands = [
     .setName('racha')
     .setDescription('Ver tu racha o la de otro usuario')
     .addUserOption(option =>
-      option.setName('usuario')
-        .setDescription('Usuario a consultar')
+      option.setName('usuario').setDescription('Usuario a consultar')
     ),
 
   new SlashCommandBuilder()
     .setName('setracha')
     .setDescription('Cambiar racha (admin)')
     .addUserOption(option =>
-      option.setName('usuario').setDescription('Usuario').setRequired(true))
+      option.setName('usuario').setRequired(true))
     .addIntegerOption(option =>
-      option.setName('valor').setDescription('Días').setRequired(true)),
+      option.setName('valor').setRequired(true)),
 
   new SlashCommandBuilder()
     .setName('leaderboard')
@@ -77,13 +76,13 @@ const commands = [
     .setName('generateshield')
     .setDescription('Dar escudo (admin)')
     .addUserOption(option =>
-      option.setName('usuario').setDescription('Usuario').setRequired(true)),
+      option.setName('usuario').setRequired(true)),
 
   new SlashCommandBuilder()
     .setName('useshield')
     .setDescription('Usar escudo')
     .addStringOption(option =>
-      option.setName('clave').setDescription('Clave').setRequired(true))
+      option.setName('clave').setRequired(true))
 ].map(cmd => cmd.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
@@ -140,7 +139,7 @@ client.on('messageCreate', async (message) => {
         await canal.send(`🔥 ${message.author.username} completó 1 día (${users[id].streakDays})`);
       }
     } catch (err) {
-      console.error("Error enviando log:", err);
+      console.error(err);
     }
 
     saveData(users);
@@ -185,8 +184,11 @@ client.on('interactionCreate', async interaction => {
     return interaction.reply(`✅ ${user.username} ahora tiene ${value}`);
   }
 
-  // 🏆 leaderboard PRIVADO SIN PING
+  // 🏆 leaderboard SIN CACHE + SIN PING
   if (cmd === 'leaderboard') {
+
+    await interaction.deferReply({ ephemeral: true });
+
     const sorted = Object.entries(users)
       .sort((a, b) => (b[1].streakDays || 0) - (a[1].streakDays || 0))
       .slice(0, 10);
@@ -203,9 +205,8 @@ client.on('interactionCreate', async interaction => {
       text += `**${i + 1}.** ${username} — ${days} días\n`;
     }
 
-    return interaction.reply({
+    return interaction.editReply({
       content: text,
-      ephemeral: true,
       allowedMentions: { parse: [] }
     });
   }
@@ -213,7 +214,6 @@ client.on('interactionCreate', async interaction => {
   // generate shield
   if (cmd === 'generateshield') {
     const user = interaction.options.getUser('usuario');
-
     const key = Math.random().toString(36).substring(2, 10).toUpperCase();
 
     shields[key] = { userId: user.id, used: false };
