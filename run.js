@@ -51,22 +51,32 @@ const client = new Client({
   ]
 });
 
-// 🔧 comandos
+// 🔧 comandos (ARREGLADOS)
 const commands = [
   new SlashCommandBuilder()
     .setName('racha')
     .setDescription('Ver tu racha o la de otro usuario')
     .addUserOption(option =>
-      option.setName('usuario').setDescription('Usuario a consultar')
+      option
+        .setName('usuario')
+        .setDescription('Usuario a consultar')
     ),
 
   new SlashCommandBuilder()
     .setName('setracha')
     .setDescription('Cambiar racha (admin)')
     .addUserOption(option =>
-      option.setName('usuario').setRequired(true))
+      option
+        .setName('usuario')
+        .setDescription('Usuario')
+        .setRequired(true)
+    )
     .addIntegerOption(option =>
-      option.setName('valor').setRequired(true)),
+      option
+        .setName('valor')
+        .setDescription('Días de racha')
+        .setRequired(true)
+    ),
 
   new SlashCommandBuilder()
     .setName('leaderboard')
@@ -76,13 +86,21 @@ const commands = [
     .setName('generateshield')
     .setDescription('Dar escudo (admin)')
     .addUserOption(option =>
-      option.setName('usuario').setRequired(true)),
+      option
+        .setName('usuario')
+        .setDescription('Usuario')
+        .setRequired(true)
+    ),
 
   new SlashCommandBuilder()
     .setName('useshield')
     .setDescription('Usar escudo')
     .addStringOption(option =>
-      option.setName('clave').setRequired(true))
+      option
+        .setName('clave')
+        .setDescription('Clave del escudo')
+        .setRequired(true)
+    )
 ].map(cmd => cmd.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
@@ -184,7 +202,7 @@ client.on('interactionCreate', async interaction => {
     return interaction.reply(`✅ ${user.username} ahora tiene ${value}`);
   }
 
-  // 🏆 leaderboard SIN CACHE + SIN PING
+  // 🏆 leaderboard PRIVADO SIN PING
   if (cmd === 'leaderboard') {
 
     await interaction.deferReply({ ephemeral: true });
@@ -199,8 +217,12 @@ client.on('interactionCreate', async interaction => {
       const userId = sorted[i][0];
       const days = sorted[i][1].streakDays || 0;
 
-      const member = interaction.guild.members.cache.get(userId);
-      const username = member ? member.user.username : "Usuario";
+      let username = "Usuario";
+
+      try {
+        const userObj = await client.users.fetch(userId);
+        username = userObj.username;
+      } catch {}
 
       text += `**${i + 1}.** ${username} — ${days} días\n`;
     }
