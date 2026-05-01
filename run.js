@@ -185,7 +185,7 @@ client.on('interactionCreate', async interaction => {
     return interaction.reply(`✅ ${user.username} ahora tiene ${value}`);
   }
 
-  // 🏆 leaderboard SIN PING
+  // 🏆 leaderboard PRIVADO SIN PING
   if (cmd === 'leaderboard') {
     const sorted = Object.entries(users)
       .sort((a, b) => (b[1].streakDays || 0) - (a[1].streakDays || 0))
@@ -197,20 +197,15 @@ client.on('interactionCreate', async interaction => {
       const userId = sorted[i][0];
       const days = sorted[i][1].streakDays || 0;
 
-      let username = "Usuario";
-
-      try {
-        const userObj = await client.users.fetch(userId);
-        username = userObj.username;
-      } catch (err) {
-        console.log("No se pudo obtener usuario:", userId);
-      }
+      const member = interaction.guild.members.cache.get(userId);
+      const username = member ? member.user.username : "Usuario";
 
       text += `**${i + 1}.** ${username} — ${days} días\n`;
     }
 
     return interaction.reply({
       content: text,
+      ephemeral: true,
       allowedMentions: { parse: [] }
     });
   }
