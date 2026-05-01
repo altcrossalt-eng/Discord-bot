@@ -5,7 +5,11 @@
   "scripts": {
     "start": "node run.js"
   },
+  "engines": {
+    "node": "18.x"
+  },
   "dependencies": {
-    "discord.js": "^14.26.3"
+    "discord.js": "^14.26.3",
+    "express": "^4.18.2"
   }
 }
