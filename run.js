@@ -7,7 +7,7 @@ const {
   SlashCommandBuilder
 } = require('discord.js');
 
-// 🛡️ ANTI-CRASH (IMPORTANTE)
+// 🛡️ ANTI-CRASH
 process.on('uncaughtException', err => {
   console.error('❌ UNCAUGHT ERROR:', err);
 });
@@ -137,7 +137,7 @@ client.on('messageCreate', async (message) => {
     try {
       const canal = await client.channels.fetch(process.env.LOG_CHANNEL_ID);
       if (canal) {
-        await canal.send(`🔥 ${message.author} completó 1 día (${users[id].streakDays})`);
+        await canal.send(`🔥 ${message.author.username} completó 1 día (${users[id].streakDays})`);
       }
     } catch (err) {
       console.error("Error enviando log:", err);
@@ -185,19 +185,34 @@ client.on('interactionCreate', async interaction => {
     return interaction.reply(`✅ ${user.username} ahora tiene ${value}`);
   }
 
-  // leaderboard
+  // 🏆 leaderboard SIN PING
   if (cmd === 'leaderboard') {
     const sorted = Object.entries(users)
-      .sort((a, b) => b[1].streakDays - a[1].streakDays)
+      .sort((a, b) => (b[1].streakDays || 0) - (a[1].streakDays || 0))
       .slice(0, 10);
 
-    let text = '🏆 TOP\n\n';
+    let text = '🏆 TOP DE RACHAS\n\n';
 
-    sorted.forEach((u, i) => {
-      text += `${i + 1}. <@${u[0]}> — ${u[1].streakDays}\n`;
+    for (let i = 0; i < sorted.length; i++) {
+      const userId = sorted[i][0];
+      const days = sorted[i][1].streakDays || 0;
+
+      let username = "Usuario";
+
+      try {
+        const userObj = await client.users.fetch(userId);
+        username = userObj.username;
+      } catch (err) {
+        console.log("No se pudo obtener usuario:", userId);
+      }
+
+      text += `**${i + 1}.** ${username} — ${days} días\n`;
+    }
+
+    return interaction.reply({
+      content: text,
+      allowedMentions: { parse: [] }
     });
-
-    return interaction.reply(text);
   }
 
   // generate shield
@@ -228,6 +243,16 @@ client.on('interactionCreate', async interaction => {
       return interaction.reply({ content: '❌ No es tuyo', ephemeral: true });
     }
 
+    if (!users[interaction.user.id]) {
+      users[interaction.user.id] = {
+        messagesToday: 0,
+        streakDays: 0,
+        last: 0,
+        locked: false,
+        shieldActive: false
+      };
+    }
+
     users[interaction.user.id].shieldActive = true;
     shield.used = true;
 
@@ -251,7 +276,7 @@ setInterval(() => {
   saveData(users);
 }, 86400000);
 
-// 🚀 login seguro
+// 🔐 login
 if (!process.env.TOKEN) {
   console.error("❌ TOKEN no definido");
   process.exit(1);
