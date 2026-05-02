@@ -28,14 +28,15 @@ mongoose.connect(process.env.MONGO_URL)
     process.exit(1);
   });
 
-// 📊 USER SCHEMA
+// 📊 USER SCHEMA (AGREGAMOS shields)
 const userSchema = new mongoose.Schema({
   userId: String,
   messagesToday: { type: Number, default: 0 },
   streakDays: { type: Number, default: 1 },
   last: { type: Number, default: 0 },
   lastDay: { type: String, default: "" },
-  locked: { type: Boolean, default: false }
+  locked: { type: Boolean, default: false },
+  shields: { type: Number, default: 0 } // 🛡️ NUEVO
 });
 
 const User = mongoose.model("User", userSchema);
@@ -49,24 +50,42 @@ const client = new Client({
   ]
 });
 
-// 🔧 COMANDOS (SOLO 2)
+// 🛡️ CLAVES EN MEMORIA
+const shieldKeys = {};
+
+// 🔧 COMANDOS
 const commands = [
   new SlashCommandBuilder()
     .setName("status")
-    .setDescription("Ver tu estado de racha o de otro usuario")
+    .setDescription("Ver tu estado o el de otro usuario")
     .addUserOption(o =>
-      o.setName("usuario").setDescription("Usuario (opcional)")
+      o.setName("usuario").setDescription("Usuario")
     ),
 
   new SlashCommandBuilder()
     .setName("tpp")
-    .setDescription("Top de rachas sin ping")
+    .setDescription("Top de rachas sin ping"),
+
+  new SlashCommandBuilder()
+    .setName("giveshield")
+    .setDescription("Dar escudo con clave (admin)")
+    .addUserOption(o =>
+      o.setName("usuario").setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("redeem")
+    .setDescription("Canjear escudo")
+    .addStringOption(o =>
+      o.setName("clave").setRequired(true)
+    )
+
 ].map(c => c.toJSON());
 
 const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
 
 // 🔥 REGISTRO
-client.once("ready", async () => {
+client.once("clientReady", async () => {
   console.log(`🤖 Bot listo como ${client.user.tag}`);
 
   await rest.put(
@@ -97,8 +116,18 @@ client.on("messageCreate", async (message) => {
       });
     }
 
-    // reset diario
+    // 🔄 reset diario + pérdida de racha
     if (user.lastDay !== today) {
+
+      if (user.messagesToday < 20) {
+        if (user.shields > 0) {
+          user.shields -= 1;
+          console.log(`🛡️ ${user.userId} salvó racha`);
+        } else {
+          user.streakDays = 1;
+        }
+      }
+
       user.messagesToday = 0;
       user.locked = false;
       user.lastDay = today;
@@ -141,19 +170,16 @@ client.on("interactionCreate", async (i) => {
       await i.deferReply({ ephemeral: true });
 
       const target = i.options.getUser("usuario") || i.user;
-
       const data = await User.findOne({ userId: target.id }).lean();
 
-      if (!data) {
-        return i.editReply("❌ Sin racha aún");
-      }
+      if (!data) return i.editReply("❌ Sin datos");
 
       return i.editReply(
-        `📊 STATUS DE ${target.username}\n\n🔥 Día: ${data.streakDays}\n💬 Mensajes: ${data.messagesToday}`
+        `📊 ${target.username}\n🔥 Día: ${data.streakDays}\n💬 ${data.messagesToday}/20\n🛡️ Escudos: ${data.shields}`
       );
     }
 
-    // 🏆 TPP (TOP SIN PING)
+    // 🏆 TOP
     if (cmd === "tpp") {
       await i.deferReply({ ephemeral: true });
 
@@ -161,10 +187,6 @@ client.on("interactionCreate", async (i) => {
         .sort({ streakDays: -1 })
         .limit(10)
         .lean();
-
-      if (!top.length) {
-        return i.editReply("❌ Sin datos aún");
-      }
 
       let text = "🏆 TOP DE RACHAS\n\n";
 
@@ -182,6 +204,56 @@ client.on("interactionCreate", async (i) => {
       }
 
       return i.editReply(text);
+    }
+
+    // 🛡️ DAR ESCUDO
+    if (cmd === "giveshield") {
+
+      if (!i.memberPermissions?.has("Administrator")) {
+        return i.reply({ content: "❌ Sin permisos", ephemeral: true });
+      }
+
+      const user = i.options.getUser("usuario");
+
+      const key = Math.random().toString(36).substring(2, 10).toUpperCase();
+
+      shieldKeys[key] = {
+        userId: user.id,
+        used: false
+      };
+
+      try {
+        await user.send(`🛡️ Tu clave: ${key}`);
+      } catch {
+        return i.reply({ content: "❌ No pude enviar DM", ephemeral: true });
+      }
+
+      return i.reply({ content: "🛡️ Clave enviada", ephemeral: true });
+    }
+
+    // 🛡️ REDEEM
+    if (cmd === "redeem") {
+
+      const key = i.options.getString("clave");
+      const data = shieldKeys[key];
+
+      if (!data || data.used) {
+        return i.reply({ content: "❌ Clave inválida", ephemeral: true });
+      }
+
+      if (data.userId !== i.user.id) {
+        return i.reply({ content: "❌ Esta clave no es tuya", ephemeral: true });
+      }
+
+      await User.updateOne(
+        { userId: i.user.id },
+        { $inc: { shields: 1 } },
+        { upsert: true }
+      );
+
+      data.used = true;
+
+      return i.reply({ content: "🛡️ Escudo añadido", ephemeral: true });
     }
 
   } catch (err) {
