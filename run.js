@@ -1,3 +1,14 @@
+const express = require("express");
+const app = express();
+
+app.get("/", (req, res) => {
+  res.send("Bot activo");
+});
+
+app.listen(process.env.PORT || 3000, () => {
+  console.log("🌐 Keep alive server activo");
+});
+
 const mongoose = require("mongoose");
 const {
   Client,
@@ -19,13 +30,16 @@ process.on("unhandledRejection", err => {
 // 📡 MONGO DB
 mongoose.connect(process.env.MONGO_URL)
   .then(() => console.log("🟢 MongoDB conectado"))
-  .catch(err => console.log("🔴 Mongo error:", err));
+  .catch(err => {
+    console.log("🔴 Mongo error:", err);
+    process.exit(1);
+  });
 
 // 📊 USER SCHEMA
 const userSchema = new mongoose.Schema({
   userId: String,
   messagesToday: { type: Number, default: 0 },
-  streakDays: { type: Number, default: 1 }, // 👈 empieza en 1
+  streakDays: { type: Number, default: 1 },
   last: { type: Number, default: 0 },
   lastDay: { type: String, default: "" },
   locked: { type: Boolean, default: false }
@@ -78,7 +92,6 @@ client.on("messageCreate", async (message) => {
 
   let user = await User.findOne({ userId: id });
 
-  // 👤 crear usuario
   if (!user) {
     user = await User.create({
       userId: id,
@@ -89,7 +102,6 @@ client.on("messageCreate", async (message) => {
     });
   }
 
-  // 🧠 reset diario
   if (user.lastDay !== today) {
     user.messagesToday = 0;
     user.locked = false;
@@ -100,15 +112,13 @@ client.on("messageCreate", async (message) => {
   if (now - user.last < 3000) return;
   user.last = now;
 
-  // ❌ si ya completó el día, no cuenta más mensajes
   if (user.locked) return;
 
   user.messagesToday++;
 
-  // 🔥 cuando llega a 20 mensajes
   if (user.messagesToday >= 20) {
-    user.streakDays += 1; // sube de día
-    user.locked = true;   // bloquea hasta mañana
+    user.streakDays += 1;
+    user.locked = true;
 
     try {
       const canal = await client.channels.fetch(process.env.LOG_CHANNEL_ID);
@@ -129,7 +139,6 @@ client.on("interactionCreate", async interaction => {
 
   const cmd = interaction.commandName;
 
-  // 🔥 racha
   if (cmd === "racha") {
     const target = interaction.options.getUser("usuario") || interaction.user;
 
@@ -145,7 +154,6 @@ client.on("interactionCreate", async interaction => {
     });
   }
 
-  // 🏆 leaderboard
   if (cmd === "leaderboard") {
     await interaction.deferReply({ ephemeral: true });
 
