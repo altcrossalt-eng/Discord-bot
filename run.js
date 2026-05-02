@@ -35,8 +35,7 @@ const userSchema = new mongoose.Schema({
   streakDays: { type: Number, default: 1 },
   last: { type: Number, default: 0 },
   lastDay: { type: String, default: "" },
-  locked: { type: Boolean, default: false },
-  shieldActive: { type: Boolean, default: false }
+  locked: { type: Boolean, default: false }
 });
 
 const User = mongoose.model("User", userSchema);
@@ -50,35 +49,18 @@ const client = new Client({
   ]
 });
 
-// 🛡️ shields en memoria
-const shields = {};
-
-// 🔧 COMANDOS
+// 🔧 COMANDOS (SOLO 2)
 const commands = [
   new SlashCommandBuilder()
-    .setName("racha")
-    .setDescription("Ver tu racha o la de otro usuario")
-    .addUserOption(o => o.setName("usuario").setDescription("Usuario")),
+    .setName("status")
+    .setDescription("Ver tu estado de racha o de otro usuario")
+    .addUserOption(o =>
+      o.setName("usuario").setDescription("Usuario (opcional)")
+    ),
 
   new SlashCommandBuilder()
-    .setName("leaderboard")
-    .setDescription("Top de rachas"),
-
-  new SlashCommandBuilder()
-    .setName("setracha")
-    .setDescription("Cambiar racha (admin)")
-    .addUserOption(o => o.setName("usuario").setDescription("Usuario").setRequired(true))
-    .addIntegerOption(o => o.setName("valor").setDescription("Días").setRequired(true)),
-
-  new SlashCommandBuilder()
-    .setName("generateshield")
-    .setDescription("Dar escudo (admin)")
-    .addUserOption(o => o.setName("usuario").setDescription("Usuario").setRequired(true)),
-
-  new SlashCommandBuilder()
-    .setName("useshield")
-    .setDescription("Usar escudo")
-    .addStringOption(o => o.setName("clave").setDescription("Clave").setRequired(true))
+    .setName("tpp")
+    .setDescription("Top de rachas sin ping")
 ].map(c => c.toJSON());
 
 const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
@@ -154,24 +136,25 @@ client.on("interactionCreate", async (i) => {
   try {
     const cmd = i.commandName;
 
-    // 🔥 racha
-    if (cmd === "racha") {
+    // 📊 STATUS
+    if (cmd === "status") {
+      await i.deferReply({ ephemeral: true });
+
       const target = i.options.getUser("usuario") || i.user;
 
       const data = await User.findOne({ userId: target.id }).lean();
 
       if (!data) {
-        return i.reply({ content: "❌ Sin racha", ephemeral: true });
+        return i.editReply("❌ Sin racha aún");
       }
 
-      return i.reply({
-        content: `🔥 ${target.username}\n📊 Día: ${data.streakDays}\n💬 Mensajes: ${data.messagesToday}`,
-        ephemeral: true
-      });
+      return i.editReply(
+        `📊 STATUS DE ${target.username}\n\n🔥 Día: ${data.streakDays}\n💬 Mensajes: ${data.messagesToday}`
+      );
     }
 
-    // 🏆 leaderboard
-    if (cmd === "leaderboard") {
+    // 🏆 TPP (TOP SIN PING)
+    if (cmd === "tpp") {
       await i.deferReply({ ephemeral: true });
 
       const top = await User.find()
@@ -179,69 +162,26 @@ client.on("interactionCreate", async (i) => {
         .limit(10)
         .lean();
 
+      if (!top.length) {
+        return i.editReply("❌ Sin datos aún");
+      }
+
       let text = "🏆 TOP DE RACHAS\n\n";
 
       for (let i2 = 0; i2 < top.length; i2++) {
         const u = top[i2];
-        text += `**${i2 + 1}.** <@${u.userId}> — Día ${u.streakDays}\n`;
+
+        let username = "Usuario";
+
+        try {
+          const userObj = await client.users.fetch(u.userId);
+          username = userObj.username;
+        } catch {}
+
+        text += `**${i2 + 1}.** ${username} — Día ${u.streakDays}\n`;
       }
 
       return i.editReply(text);
-    }
-
-    // 🔧 setracha
-    if (cmd === "setracha") {
-      if (!i.memberPermissions?.has("Administrator")) {
-        return i.reply({ content: "❌ Sin permisos", ephemeral: true });
-      }
-
-      const user = i.options.getUser("usuario");
-      const value = i.options.getInteger("valor");
-
-      await User.updateOne(
-        { userId: user.id },
-        { $set: { streakDays: value } },
-        { upsert: true }
-      );
-
-      return i.reply(`✅ ${user.username} ahora tiene ${value}`);
-    }
-
-    // 🛡️ generate shield
-    if (cmd === "generateshield") {
-      const user = i.options.getUser("usuario");
-      const key = Math.random().toString(36).substring(2, 10).toUpperCase();
-
-      shields[key] = { userId: user.id, used: false };
-
-      try {
-        await user.send(`🛡️ Clave: ${key}`);
-      } catch {}
-
-      return i.reply({ content: "🛡️ enviado", ephemeral: true });
-    }
-
-    // 🛡️ use shield
-    if (cmd === "useshield") {
-      const key = i.options.getString("clave");
-      const s = shields[key];
-
-      if (!s || s.used) {
-        return i.reply({ content: "❌ inválido", ephemeral: true });
-      }
-
-      if (s.userId !== i.user.id) {
-        return i.reply({ content: "❌ no es tuyo", ephemeral: true });
-      }
-
-      await User.updateOne(
-        { userId: i.user.id },
-        { $set: { shieldActive: true } }
-      );
-
-      s.used = true;
-
-      return i.reply("🛡️ escudo activado");
     }
 
   } catch (err) {
