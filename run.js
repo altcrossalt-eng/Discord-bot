@@ -89,17 +89,19 @@ client.on("messageCreate", async (message) => {
 
   let user = await User.findOne({ userId: id });
 
+  // 👤 CREAR USUARIO BIEN INICIALIZADO
   if (!user) {
     user = await User.create({
       userId: id,
       streakDays: 1,
       messagesToday: 0,
+      last: 0,
       lastDay: today,
       locked: false
     });
   }
 
-  // reset diario
+  // 🔄 RESET DIARIO SEGURO
   if (user.lastDay !== today) {
     user.messagesToday = 0;
     user.locked = false;
@@ -110,11 +112,12 @@ client.on("messageCreate", async (message) => {
   if (now - user.last < 3000) return;
 
   user.last = now;
+
   if (user.locked) return;
 
   user.messagesToday++;
 
-  // 🔥 subir día
+  // 🔥 SUBIR DE DÍA
   if (user.messagesToday >= 20) {
     user.streakDays += 1;
     user.locked = true;
@@ -122,7 +125,7 @@ client.on("messageCreate", async (message) => {
     try {
       const canal = await client.channels.fetch(process.env.LOG_CHANNEL_ID);
       if (canal) {
-        canal.send(
+        await canal.send(
           `🔥 ${message.author.username} subió a día ${user.streakDays}`
         );
       }
