@@ -1,9 +1,7 @@
 const express = require("express");
 const app = express();
 
-app.get("/", (req, res) => {
-  res.send("Bot activo");
-});
+app.get("/", (req, res) => res.send("Bot activo"));
 
 app.listen(process.env.PORT || 3000, () => {
   console.log("🌐 Keep alive server activo");
@@ -37,12 +35,13 @@ const userSchema = new mongoose.Schema({
   streakDays: { type: Number, default: 1 },
   last: { type: Number, default: 0 },
   lastDay: { type: String, default: "" },
-  locked: { type: Boolean, default: false }
+  locked: { type: Boolean, default: false },
+  shieldActive: { type: Boolean, default: false }
 });
 
 const User = mongoose.model("User", userSchema);
 
-// 🤖 CLIENTE
+// 🤖 BOT
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -51,24 +50,41 @@ const client = new Client({
   ]
 });
 
+// 🛡️ shields en memoria
+const shields = {};
+
 // 🔧 COMANDOS
 const commands = [
   new SlashCommandBuilder()
     .setName("racha")
     .setDescription("Ver tu racha o la de otro usuario")
-    .addUserOption(o =>
-      o.setName("usuario").setDescription("Usuario")
-    ),
+    .addUserOption(o => o.setName("usuario").setDescription("Usuario")),
 
   new SlashCommandBuilder()
     .setName("leaderboard")
-    .setDescription("Top de rachas")
-].map(cmd => cmd.toJSON());
+    .setDescription("Top de rachas"),
+
+  new SlashCommandBuilder()
+    .setName("setracha")
+    .setDescription("Cambiar racha (admin)")
+    .addUserOption(o => o.setName("usuario").setDescription("Usuario").setRequired(true))
+    .addIntegerOption(o => o.setName("valor").setDescription("Días").setRequired(true)),
+
+  new SlashCommandBuilder()
+    .setName("generateshield")
+    .setDescription("Dar escudo (admin)")
+    .addUserOption(o => o.setName("usuario").setDescription("Usuario").setRequired(true)),
+
+  new SlashCommandBuilder()
+    .setName("useshield")
+    .setDescription("Usar escudo")
+    .addStringOption(o => o.setName("clave").setDescription("Clave").setRequired(true))
+].map(c => c.toJSON());
 
 const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
 
-// ✅ BOT LISTO
-client.once("clientReady", async () => {
+// 🔥 REGISTRO
+client.once("ready", async () => {
   console.log(`🤖 Bot listo como ${client.user.tag}`);
 
   await rest.put(
@@ -81,119 +97,163 @@ client.once("clientReady", async () => {
 
 // 📩 MENSAJES (RACHAS)
 client.on("messageCreate", async (message) => {
-  if (message.author.bot) return;
-  if (message.channel.id !== process.env.CHANNEL_ID) return;
+  try {
+    if (message.author.bot) return;
+    if (message.channel.id !== process.env.CHANNEL_ID) return;
 
-  const id = message.author.id;
-  const today = new Date().toDateString();
+    const id = message.author.id;
+    const today = new Date().toDateString();
 
-  let user = await User.findOne({ userId: id });
+    let user = await User.findOne({ userId: id });
 
-  // 👤 CREAR USUARIO BIEN INICIALIZADO
-  if (!user) {
-    user = await User.create({
-      userId: id,
-      streakDays: 1,
-      messagesToday: 0,
-      last: 0,
-      lastDay: today,
-      locked: false
-    });
-  }
-
-  // 🔄 RESET DIARIO SEGURO
-  if (user.lastDay !== today) {
-    user.messagesToday = 0;
-    user.locked = false;
-    user.lastDay = today;
-  }
-
-  const now = Date.now();
-  if (now - user.last < 3000) return;
-
-  user.last = now;
-
-  if (user.locked) return;
-
-  user.messagesToday++;
-
-  // 🔥 SUBIR DE DÍA
-  if (user.messagesToday >= 20) {
-    user.streakDays += 1;
-    user.locked = true;
-
-    try {
-      const canal = await client.channels.fetch(process.env.LOG_CHANNEL_ID);
-      if (canal) {
-        await canal.send(
-          `🔥 ${message.author.username} subió a día ${user.streakDays}`
-        );
-      }
-    } catch (err) {
-      console.error(err);
+    if (!user) {
+      user = await User.create({
+        userId: id,
+        messagesToday: 0,
+        streakDays: 1,
+        lastDay: today
+      });
     }
-  }
 
-  await user.save();
+    // reset diario
+    if (user.lastDay !== today) {
+      user.messagesToday = 0;
+      user.locked = false;
+      user.lastDay = today;
+    }
+
+    if (Date.now() - user.last < 3000) return;
+    user.last = Date.now();
+
+    if (user.locked) return;
+
+    user.messagesToday++;
+
+    // 🔥 subir día
+    if (user.messagesToday >= 20) {
+      user.streakDays += 1;
+      user.locked = true;
+
+      const canal = await client.channels.fetch(process.env.LOG_CHANNEL_ID).catch(() => null);
+      if (canal) {
+        canal.send(`🔥 ${message.author.username} subió a día ${user.streakDays}`);
+      }
+    }
+
+    await user.save();
+
+  } catch (err) {
+    console.error("❌ MESSAGE ERROR:", err);
+  }
 });
 
 // ⚡ COMANDOS
-client.on("interactionCreate", async interaction => {
-  if (!interaction.isChatInputCommand()) return;
+client.on("interactionCreate", async (i) => {
+  if (!i.isChatInputCommand()) return;
 
-  const cmd = interaction.commandName;
+  try {
+    const cmd = i.commandName;
 
-  // 🔥 RACHAS
-  if (cmd === "racha") {
-    await interaction.deferReply({ ephemeral: true });
+    // 🔥 racha
+    if (cmd === "racha") {
+      const target = i.options.getUser("usuario") || i.user;
 
-    const target = interaction.options.getUser("usuario") || interaction.user;
+      const data = await User.findOne({ userId: target.id }).lean();
 
-    let data;
-    try {
-      data = await User.findOne({ userId: target.id });
-    } catch (err) {
-      console.error(err);
-      return interaction.editReply("❌ Error en base de datos");
+      if (!data) {
+        return i.reply({ content: "❌ Sin racha", ephemeral: true });
+      }
+
+      return i.reply({
+        content: `🔥 ${target.username}\n📊 Día: ${data.streakDays}\n💬 Mensajes: ${data.messagesToday}`,
+        ephemeral: true
+      });
     }
 
-    if (!data) {
-      return interaction.editReply("❌ Sin racha");
-    }
+    // 🏆 leaderboard
+    if (cmd === "leaderboard") {
+      await i.deferReply({ ephemeral: true });
 
-    return interaction.editReply(
-      `🔥 ${target.username}\n📊 Día: ${data.streakDays}\n💬 Mensajes: ${data.messagesToday}`
-    );
-  }
-
-  // 🏆 LEADERBOARD
-  if (cmd === "leaderboard") {
-    await interaction.deferReply({ ephemeral: true });
-
-    let top;
-    try {
-      top = await User.find()
+      const top = await User.find()
         .sort({ streakDays: -1 })
         .limit(10)
         .lean();
-    } catch (err) {
-      console.error(err);
-      return interaction.editReply("❌ Error cargando leaderboard");
+
+      let text = "🏆 TOP DE RACHAS\n\n";
+
+      for (let i2 = 0; i2 < top.length; i2++) {
+        const u = top[i2];
+        text += `**${i2 + 1}.** <@${u.userId}> — Día ${u.streakDays}\n`;
+      }
+
+      return i.editReply(text);
     }
 
-    if (!top.length) {
-      return interaction.editReply("❌ No hay datos aún");
+    // 🔧 setracha
+    if (cmd === "setracha") {
+      if (!i.memberPermissions?.has("Administrator")) {
+        return i.reply({ content: "❌ Sin permisos", ephemeral: true });
+      }
+
+      const user = i.options.getUser("usuario");
+      const value = i.options.getInteger("valor");
+
+      await User.updateOne(
+        { userId: user.id },
+        { $set: { streakDays: value } },
+        { upsert: true }
+      );
+
+      return i.reply(`✅ ${user.username} ahora tiene ${value}`);
     }
 
-    let text = "🏆 TOP DE RACHAS\n\n";
+    // 🛡️ generate shield
+    if (cmd === "generateshield") {
+      const user = i.options.getUser("usuario");
+      const key = Math.random().toString(36).substring(2, 10).toUpperCase();
 
-    top.forEach((u, i) => {
-      text += `**${i + 1}.** <@${u.userId}> — Día ${u.streakDays}\n`;
-    });
+      shields[key] = { userId: user.id, used: false };
 
-    return interaction.editReply(text);
+      try {
+        await user.send(`🛡️ Clave: ${key}`);
+      } catch {}
+
+      return i.reply({ content: "🛡️ enviado", ephemeral: true });
+    }
+
+    // 🛡️ use shield
+    if (cmd === "useshield") {
+      const key = i.options.getString("clave");
+      const s = shields[key];
+
+      if (!s || s.used) {
+        return i.reply({ content: "❌ inválido", ephemeral: true });
+      }
+
+      if (s.userId !== i.user.id) {
+        return i.reply({ content: "❌ no es tuyo", ephemeral: true });
+      }
+
+      await User.updateOne(
+        { userId: i.user.id },
+        { $set: { shieldActive: true } }
+      );
+
+      s.used = true;
+
+      return i.reply("🛡️ escudo activado");
+    }
+
+  } catch (err) {
+    console.error("❌ INTERACTION ERROR:", err);
+
+    if (!i.replied) {
+      await i.reply({
+        content: "❌ Error interno",
+        ephemeral: true
+      });
+    }
   }
 });
 
-// 🔐 LOGIN
 client.login(process.env.TOKEN);
