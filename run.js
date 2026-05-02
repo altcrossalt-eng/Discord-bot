@@ -18,16 +18,11 @@ const {
   SlashCommandBuilder
 } = require("discord.js");
 
-// 🛡️ ANTI-CRASH
-process.on("uncaughtException", err => {
-  console.error("❌ UNCAUGHT ERROR:", err);
-});
+// 🛡️ ERRORES GLOBALES
+process.on("uncaughtException", console.error);
+process.on("unhandledRejection", console.error);
 
-process.on("unhandledRejection", err => {
-  console.error("❌ PROMISE ERROR:", err);
-});
-
-// 📡 MONGO DB
+// 📡 MONGO
 mongoose.connect(process.env.MONGO_URL)
   .then(() => console.log("🟢 MongoDB conectado"))
   .catch(err => {
@@ -61,7 +56,9 @@ const commands = [
   new SlashCommandBuilder()
     .setName("racha")
     .setDescription("Ver tu racha o la de otro usuario")
-    .addUserOption(o => o.setName("usuario").setDescription("Usuario")),
+    .addUserOption(o =>
+      o.setName("usuario").setDescription("Usuario")
+    ),
 
   new SlashCommandBuilder()
     .setName("leaderboard")
@@ -82,7 +79,7 @@ client.once("clientReady", async () => {
   console.log("✅ Slash commands registrados");
 });
 
-// 📩 MENSAJES (RACHAS PERFECTAS)
+// 📩 MENSAJES (RACHAS)
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
   if (message.channel.id !== process.env.CHANNEL_ID) return;
@@ -102,6 +99,7 @@ client.on("messageCreate", async (message) => {
     });
   }
 
+  // reset diario
   if (user.lastDay !== today) {
     user.messagesToday = 0;
     user.locked = false;
@@ -110,12 +108,13 @@ client.on("messageCreate", async (message) => {
 
   const now = Date.now();
   if (now - user.last < 3000) return;
-  user.last = now;
 
+  user.last = now;
   if (user.locked) return;
 
   user.messagesToday++;
 
+  // 🔥 subir día
   if (user.messagesToday >= 20) {
     user.streakDays += 1;
     user.locked = true;
@@ -127,7 +126,9 @@ client.on("messageCreate", async (message) => {
           `🔥 ${message.author.username} subió a día ${user.streakDays}`
         );
       }
-    } catch {}
+    } catch (err) {
+      console.error(err);
+    }
   }
 
   await user.save();
@@ -139,25 +140,47 @@ client.on("interactionCreate", async interaction => {
 
   const cmd = interaction.commandName;
 
+  // 🔥 RACHAS
   if (cmd === "racha") {
+    await interaction.deferReply({ ephemeral: true });
+
     const target = interaction.options.getUser("usuario") || interaction.user;
 
-    const data = await User.findOne({ userId: target.id });
-
-    if (!data) {
-      return interaction.reply({ content: "❌ Sin racha", ephemeral: true });
+    let data;
+    try {
+      data = await User.findOne({ userId: target.id });
+    } catch (err) {
+      console.error(err);
+      return interaction.editReply("❌ Error en base de datos");
     }
 
-    return interaction.reply({
-      content: `🔥 ${target.username}\n📊 Día: ${data.streakDays}\n💬 Mensajes: ${data.messagesToday}`,
-      ephemeral: true
-    });
+    if (!data) {
+      return interaction.editReply("❌ Sin racha");
+    }
+
+    return interaction.editReply(
+      `🔥 ${target.username}\n📊 Día: ${data.streakDays}\n💬 Mensajes: ${data.messagesToday}`
+    );
   }
 
+  // 🏆 LEADERBOARD
   if (cmd === "leaderboard") {
     await interaction.deferReply({ ephemeral: true });
 
-    const top = await User.find().sort({ streakDays: -1 }).limit(10);
+    let top;
+    try {
+      top = await User.find()
+        .sort({ streakDays: -1 })
+        .limit(10)
+        .lean();
+    } catch (err) {
+      console.error(err);
+      return interaction.editReply("❌ Error cargando leaderboard");
+    }
+
+    if (!top.length) {
+      return interaction.editReply("❌ No hay datos aún");
+    }
 
     let text = "🏆 TOP DE RACHAS\n\n";
 
