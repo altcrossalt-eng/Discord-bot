@@ -1,48 +1,39 @@
-const fs = require('fs');
+const mongoose = require("mongoose");
 const {
   Client,
   GatewayIntentBits,
   REST,
   Routes,
   SlashCommandBuilder
-} = require('discord.js');
+} = require("discord.js");
 
 // 🛡️ ANTI-CRASH
-process.on('uncaughtException', err => {
-  console.error('❌ UNCAUGHT ERROR:', err);
+process.on("uncaughtException", err => {
+  console.error("❌ UNCAUGHT ERROR:", err);
 });
 
-process.on('unhandledRejection', err => {
-  console.error('❌ PROMISE ERROR:', err);
+process.on("unhandledRejection", err => {
+  console.error("❌ PROMISE ERROR:", err);
 });
 
-const DATA_FILE = './data.json';
+// 📡 MONGO DB
+mongoose.connect(process.env.MONGO_URL)
+  .then(() => console.log("🟢 MongoDB conectado"))
+  .catch(err => console.log("🔴 Mongo error:", err));
 
-// 📦 cargar datos seguro
-function loadData() {
-  try {
-    if (!fs.existsSync(DATA_FILE)) return {};
-    const raw = fs.readFileSync(DATA_FILE, 'utf8');
-    return raw ? JSON.parse(raw) : {};
-  } catch (err) {
-    console.error("❌ Error leyendo data.json:", err);
-    return {};
-  }
-}
+// 📊 USER SCHEMA
+const userSchema = new mongoose.Schema({
+  userId: String,
+  messagesToday: { type: Number, default: 0 },
+  streakDays: { type: Number, default: 1 }, // 👈 empieza en 1
+  last: { type: Number, default: 0 },
+  lastDay: { type: String, default: "" },
+  locked: { type: Boolean, default: false }
+});
 
-// 💾 guardar datos seguro
-function saveData(data) {
-  try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
-  } catch (err) {
-    console.error("❌ Error guardando data.json:", err);
-  }
-}
+const User = mongoose.model("User", userSchema);
 
-let users = loadData();
-let shields = {};
-
-// 🤖 cliente
+// 🤖 CLIENTE
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -51,252 +42,124 @@ const client = new Client({
   ]
 });
 
-// 🔧 comandos (ARREGLADOS)
+// 🔧 COMANDOS
 const commands = [
   new SlashCommandBuilder()
-    .setName('racha')
-    .setDescription('Ver tu racha o la de otro usuario')
-    .addUserOption(option =>
-      option
-        .setName('usuario')
-        .setDescription('Usuario a consultar')
-    ),
+    .setName("racha")
+    .setDescription("Ver tu racha o la de otro usuario")
+    .addUserOption(o => o.setName("usuario").setDescription("Usuario")),
 
   new SlashCommandBuilder()
-    .setName('setracha')
-    .setDescription('Cambiar racha (admin)')
-    .addUserOption(option =>
-      option
-        .setName('usuario')
-        .setDescription('Usuario')
-        .setRequired(true)
-    )
-    .addIntegerOption(option =>
-      option
-        .setName('valor')
-        .setDescription('Días de racha')
-        .setRequired(true)
-    ),
-
-  new SlashCommandBuilder()
-    .setName('leaderboard')
-    .setDescription('Top de rachas'),
-
-  new SlashCommandBuilder()
-    .setName('generateshield')
-    .setDescription('Dar escudo (admin)')
-    .addUserOption(option =>
-      option
-        .setName('usuario')
-        .setDescription('Usuario')
-        .setRequired(true)
-    ),
-
-  new SlashCommandBuilder()
-    .setName('useshield')
-    .setDescription('Usar escudo')
-    .addStringOption(option =>
-      option
-        .setName('clave')
-        .setDescription('Clave del escudo')
-        .setRequired(true)
-    )
+    .setName("leaderboard")
+    .setDescription("Top de rachas")
 ].map(cmd => cmd.toJSON());
 
-const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
+const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
 
 // ✅ BOT LISTO
-client.once('clientReady', async () => {
+client.once("clientReady", async () => {
   console.log(`🤖 Bot listo como ${client.user.tag}`);
 
-  try {
-    await rest.put(
-      Routes.applicationCommands(client.user.id),
-      { body: commands }
-    );
-    console.log('✅ Slash commands registrados');
-  } catch (err) {
-    console.error(err);
-  }
+  await rest.put(
+    Routes.applicationCommands(client.user.id),
+    { body: commands }
+  );
+
+  console.log("✅ Slash commands registrados");
 });
 
-// 📩 MENSAJES (rachas)
-client.on('messageCreate', async (message) => {
+// 📩 MENSAJES (RACHAS PERFECTAS)
+client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
   if (message.channel.id !== process.env.CHANNEL_ID) return;
 
   const id = message.author.id;
+  const today = new Date().toDateString();
 
-  if (!users[id]) {
-    users[id] = {
+  let user = await User.findOne({ userId: id });
+
+  // 👤 crear usuario
+  if (!user) {
+    user = await User.create({
+      userId: id,
+      streakDays: 1,
       messagesToday: 0,
-      streakDays: 0,
-      last: 0,
-      locked: false,
-      shieldActive: false
-    };
+      lastDay: today,
+      locked: false
+    });
+  }
+
+  // 🧠 reset diario
+  if (user.lastDay !== today) {
+    user.messagesToday = 0;
+    user.locked = false;
+    user.lastDay = today;
   }
 
   const now = Date.now();
-  if (now - users[id].last < 3000) return;
+  if (now - user.last < 3000) return;
+  user.last = now;
 
-  users[id].last = now;
-  if (users[id].locked) return;
+  // ❌ si ya completó el día, no cuenta más mensajes
+  if (user.locked) return;
 
-  users[id].messagesToday++;
-  saveData(users);
+  user.messagesToday++;
 
-  if (users[id].messagesToday >= 20) {
-    users[id].streakDays++;
-    users[id].messagesToday = 0;
-    users[id].locked = true;
+  // 🔥 cuando llega a 20 mensajes
+  if (user.messagesToday >= 20) {
+    user.streakDays += 1; // sube de día
+    user.locked = true;   // bloquea hasta mañana
 
     try {
       const canal = await client.channels.fetch(process.env.LOG_CHANNEL_ID);
       if (canal) {
-        await canal.send(`🔥 ${message.author.username} completó 1 día (${users[id].streakDays})`);
+        canal.send(
+          `🔥 ${message.author.username} subió a día ${user.streakDays}`
+        );
       }
-    } catch (err) {
-      console.error(err);
-    }
-
-    saveData(users);
+    } catch {}
   }
+
+  await user.save();
 });
 
 // ⚡ COMANDOS
-client.on('interactionCreate', async interaction => {
+client.on("interactionCreate", async interaction => {
   if (!interaction.isChatInputCommand()) return;
 
   const cmd = interaction.commandName;
 
-  // racha
-  if (cmd === 'racha') {
-    const user = interaction.options.getUser('usuario') || interaction.user;
-    const data = users[user.id];
+  // 🔥 racha
+  if (cmd === "racha") {
+    const target = interaction.options.getUser("usuario") || interaction.user;
+
+    const data = await User.findOne({ userId: target.id });
 
     if (!data) {
-      return interaction.reply({ content: '❌ Sin racha', ephemeral: true });
+      return interaction.reply({ content: "❌ Sin racha", ephemeral: true });
     }
 
     return interaction.reply({
-      content: `🔥 ${user.username}\n📊 ${data.streakDays} días\n💬 ${data.messagesToday} mensajes`,
+      content: `🔥 ${target.username}\n📊 Día: ${data.streakDays}\n💬 Mensajes: ${data.messagesToday}`,
       ephemeral: true
     });
   }
 
-  // setracha
-  if (cmd === 'setracha') {
-    if (!interaction.member.permissions.has('Administrator')) {
-      return interaction.reply({ content: '❌ Sin permisos', ephemeral: true });
-    }
-
-    const user = interaction.options.getUser('usuario');
-    const value = interaction.options.getInteger('valor');
-
-    if (!users[user.id]) users[user.id] = { streakDays: 0 };
-
-    users[user.id].streakDays = value;
-    saveData(users);
-
-    return interaction.reply(`✅ ${user.username} ahora tiene ${value}`);
-  }
-
-  // 🏆 leaderboard PRIVADO SIN PING
-  if (cmd === 'leaderboard') {
-
+  // 🏆 leaderboard
+  if (cmd === "leaderboard") {
     await interaction.deferReply({ ephemeral: true });
 
-    const sorted = Object.entries(users)
-      .sort((a, b) => (b[1].streakDays || 0) - (a[1].streakDays || 0))
-      .slice(0, 10);
+    const top = await User.find().sort({ streakDays: -1 }).limit(10);
 
-    let text = '🏆 TOP DE RACHAS\n\n';
+    let text = "🏆 TOP DE RACHAS\n\n";
 
-    for (let i = 0; i < sorted.length; i++) {
-      const userId = sorted[i][0];
-      const days = sorted[i][1].streakDays || 0;
-
-      let username = "Usuario";
-
-      try {
-        const userObj = await client.users.fetch(userId);
-        username = userObj.username;
-      } catch {}
-
-      text += `**${i + 1}.** ${username} — ${days} días\n`;
-    }
-
-    return interaction.editReply({
-      content: text,
-      allowedMentions: { parse: [] }
+    top.forEach((u, i) => {
+      text += `**${i + 1}.** <@${u.userId}> — Día ${u.streakDays}\n`;
     });
-  }
 
-  // generate shield
-  if (cmd === 'generateshield') {
-    const user = interaction.options.getUser('usuario');
-    const key = Math.random().toString(36).substring(2, 10).toUpperCase();
-
-    shields[key] = { userId: user.id, used: false };
-
-    try {
-      await user.send(`🛡️ Clave: ${key}`);
-    } catch {}
-
-    return interaction.reply({ content: '🛡️ Enviado por DM', ephemeral: true });
-  }
-
-  // usar shield
-  if (cmd === 'useshield') {
-    const key = interaction.options.getString('clave');
-    const shield = shields[key];
-
-    if (!shield || shield.used) {
-      return interaction.reply({ content: '❌ Clave inválida', ephemeral: true });
-    }
-
-    if (shield.userId !== interaction.user.id) {
-      return interaction.reply({ content: '❌ No es tuyo', ephemeral: true });
-    }
-
-    if (!users[interaction.user.id]) {
-      users[interaction.user.id] = {
-        messagesToday: 0,
-        streakDays: 0,
-        last: 0,
-        locked: false,
-        shieldActive: false
-      };
-    }
-
-    users[interaction.user.id].shieldActive = true;
-    shield.used = true;
-
-    saveData(users);
-
-    return interaction.reply('🛡️ Escudo activado');
+    return interaction.editReply(text);
   }
 });
 
-// 🔄 reset diario
-setInterval(() => {
-  for (const id in users) {
-    if (users[id].shieldActive) {
-      users[id].shieldActive = false;
-      continue;
-    }
-    users[id].streakDays = 0;
-    users[id].messagesToday = 0;
-    users[id].locked = false;
-  }
-  saveData(users);
-}, 86400000);
-
-// 🔐 login
-if (!process.env.TOKEN) {
-  console.error("❌ TOKEN no definido");
-  process.exit(1);
-}
-
+// 🔐 LOGIN
 client.login(process.env.TOKEN);
