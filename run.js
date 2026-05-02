@@ -28,7 +28,7 @@ mongoose.connect(process.env.MONGO_URL)
     process.exit(1);
   });
 
-// 📊 USER SCHEMA (AGREGAMOS shields)
+// 📊 USER SCHEMA
 const userSchema = new mongoose.Schema({
   userId: String,
   messagesToday: { type: Number, default: 0 },
@@ -36,7 +36,7 @@ const userSchema = new mongoose.Schema({
   last: { type: Number, default: 0 },
   lastDay: { type: String, default: "" },
   locked: { type: Boolean, default: false },
-  shields: { type: Number, default: 0 } // 🛡️ NUEVO
+  shields: { type: Number, default: 0 }
 });
 
 const User = mongoose.model("User", userSchema);
@@ -59,7 +59,8 @@ const commands = [
     .setName("status")
     .setDescription("Ver tu estado o el de otro usuario")
     .addUserOption(o =>
-      o.setName("usuario").setDescription("Usuario")
+      o.setName("usuario")
+       .setDescription("Usuario a consultar")
     ),
 
   new SlashCommandBuilder()
@@ -70,14 +71,18 @@ const commands = [
     .setName("giveshield")
     .setDescription("Dar escudo con clave (admin)")
     .addUserOption(o =>
-      o.setName("usuario").setRequired(true)
+      o.setName("usuario")
+       .setDescription("Usuario que recibirá el escudo")
+       .setRequired(true)
     ),
 
   new SlashCommandBuilder()
     .setName("redeem")
     .setDescription("Canjear escudo")
     .addStringOption(o =>
-      o.setName("clave").setRequired(true)
+      o.setName("clave")
+       .setDescription("Clave del escudo")
+       .setRequired(true)
     )
 
 ].map(c => c.toJSON());
@@ -116,7 +121,7 @@ client.on("messageCreate", async (message) => {
       });
     }
 
-    // 🔄 reset diario + pérdida de racha
+    // 🔄 reset diario + sistema escudo
     if (user.lastDay !== today) {
 
       if (user.messagesToday < 20) {
@@ -187,6 +192,8 @@ client.on("interactionCreate", async (i) => {
         .sort({ streakDays: -1 })
         .limit(10)
         .lean();
+
+      if (!top.length) return i.editReply("❌ Sin datos aún");
 
       let text = "🏆 TOP DE RACHAS\n\n";
 
