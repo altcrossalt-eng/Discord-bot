@@ -36,7 +36,8 @@ const userSchema = new mongoose.Schema({
   last: { type: Number, default: 0 },
   lastDay: { type: String, default: "" },
   locked: { type: Boolean, default: false },
-  shields: { type: Number, default: 0 }
+  shields: { type: Number, default: 0 },
+  lastStreakAt: { type: Number, default: 0 } // 🔥 NUEVO
 });
 
 const User = mongoose.model("User", userSchema);
@@ -101,7 +102,7 @@ client.once("clientReady", async () => {
   console.log("✅ Slash commands registrados");
 });
 
-// 📩 MENSAJES (RACHAS)
+// 📩 MENSAJES
 client.on("messageCreate", async (message) => {
   try {
     if (message.author.bot) return;
@@ -109,7 +110,6 @@ client.on("messageCreate", async (message) => {
 
     const id = message.author.id;
 
-    // ✅ FIX ZONA HORARIA MÉXICO
     const today = new Date().toLocaleDateString("en-CA", {
       timeZone: "America/Mexico_City"
     });
@@ -125,13 +125,12 @@ client.on("messageCreate", async (message) => {
       });
     }
 
-    // 🔄 reset diario + sistema escudo
+    // 🔄 RESET DIARIO (solo mensajes + escudos)
     if (user.lastDay !== today) {
 
       if (user.messagesToday < 20) {
         if (user.shields > 0) {
           user.shields -= 1;
-          console.log(`🛡️ ${user.userId} salvó racha`);
         } else {
           user.streakDays = 1;
         }
@@ -142,7 +141,7 @@ client.on("messageCreate", async (message) => {
       user.lastDay = today;
     }
 
-    // anti spam tiempo
+    // anti spam
     if (Date.now() - user.last < 3000) return;
     user.last = Date.now();
 
@@ -150,14 +149,26 @@ client.on("messageCreate", async (message) => {
 
     user.messagesToday++;
 
-    // 🔥 subir día (ANTI DOBLE)
-    if (user.messagesToday >= 20 && !user.locked) {
-      user.streakDays += 1;
-      user.locked = true;
+    // 🔥 COOLDOWN 24H REAL
+    const now = Date.now();
+    const COOLDOWN = 1000 * 60 * 60 * 24;
 
-      const canal = await client.channels.fetch(process.env.LOG_CHANNEL_ID).catch(() => null);
-      if (canal) {
-        canal.send(`🔥 ${message.author.username} subió a día ${user.streakDays}`);
+    if (user.messagesToday >= 20) {
+
+      if (now - user.lastStreakAt >= COOLDOWN) {
+
+        user.streakDays += 1;
+        user.lastStreakAt = now;
+        user.locked = true;
+
+        const canal = await client.channels.fetch(process.env.LOG_CHANNEL_ID).catch(() => null);
+        if (canal) {
+          canal.send(`🔥 ${message.author.username} subió a día ${user.streakDays}`);
+        }
+
+      } else {
+        // en cooldown
+        user.locked = true;
       }
     }
 
@@ -175,7 +186,6 @@ client.on("interactionCreate", async (i) => {
   try {
     const cmd = i.commandName;
 
-    // 📊 STATUS
     if (cmd === "status") {
       await i.deferReply({ ephemeral: true });
 
@@ -184,12 +194,18 @@ client.on("interactionCreate", async (i) => {
 
       if (!data) return i.editReply("❌ Sin datos");
 
+      const remaining = data.lastStreakAt
+        ? Math.max(0, (1000 * 60 * 60 * 24) - (Date.now() - data.lastStreakAt))
+        : 0;
+
+      const hours = Math.floor(remaining / (1000 * 60 * 60));
+      const minutes = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
+
       return i.editReply(
-        `📊 ${target.username}\n🔥 Día: ${data.streakDays}\n💬 ${data.messagesToday}/20\n🛡️ Escudos: ${data.shields}`
+        `📊 ${target.username}\n🔥 Día: ${data.streakDays}\n💬 ${data.messagesToday}/20\n🛡️ Escudos: ${data.shields}\n⏳ Cooldown: ${hours}h ${minutes}m`
       );
     }
 
-    // 🏆 TOP
     if (cmd === "tpp") {
       await i.deferReply({ ephemeral: true });
 
@@ -197,8 +213,6 @@ client.on("interactionCreate", async (i) => {
         .sort({ streakDays: -1 })
         .limit(10)
         .lean();
-
-      if (!top.length) return i.editReply("❌ Sin datos aún");
 
       let text = "🏆 TOP DE RACHAS\n\n";
 
@@ -218,21 +232,15 @@ client.on("interactionCreate", async (i) => {
       return i.editReply(text);
     }
 
-    // 🛡️ DAR ESCUDO
     if (cmd === "giveshield") {
-
       if (!i.memberPermissions?.has("Administrator")) {
         return i.reply({ content: "❌ Sin permisos", ephemeral: true });
       }
 
       const user = i.options.getUser("usuario");
-
       const key = Math.random().toString(36).substring(2, 10).toUpperCase();
 
-      shieldKeys[key] = {
-        userId: user.id,
-        used: false
-      };
+      shieldKeys[key] = { userId: user.id, used: false };
 
       try {
         await user.send(`🛡️ Tu clave: ${key}`);
@@ -243,9 +251,7 @@ client.on("interactionCreate", async (i) => {
       return i.reply({ content: "🛡️ Clave enviada", ephemeral: true });
     }
 
-    // 🛡️ REDEEM
     if (cmd === "redeem") {
-
       const key = i.options.getString("clave");
       const data = shieldKeys[key];
 
