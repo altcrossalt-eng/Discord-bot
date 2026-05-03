@@ -108,7 +108,11 @@ client.on("messageCreate", async (message) => {
     if (message.channel.id !== process.env.CHANNEL_ID) return;
 
     const id = message.author.id;
-    const today = new Date().toDateString();
+
+    // ✅ FIX ZONA HORARIA MÉXICO
+    const today = new Date().toLocaleDateString("en-CA", {
+      timeZone: "America/Mexico_City"
+    });
 
     let user = await User.findOne({ userId: id });
 
@@ -138,6 +142,7 @@ client.on("messageCreate", async (message) => {
       user.lastDay = today;
     }
 
+    // anti spam tiempo
     if (Date.now() - user.last < 3000) return;
     user.last = Date.now();
 
@@ -145,8 +150,8 @@ client.on("messageCreate", async (message) => {
 
     user.messagesToday++;
 
-    // 🔥 subir día
-    if (user.messagesToday >= 20) {
+    // 🔥 subir día (ANTI DOBLE)
+    if (user.messagesToday >= 20 && !user.locked) {
       user.streakDays += 1;
       user.locked = true;
 
