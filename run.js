@@ -126,7 +126,6 @@ client.on("messageCreate", async (message) => {
 
     // 🔄 RESET DIARIO
     if (user.lastDay !== today) {
-
       if (user.messagesToday < 20) {
         if (user.shields > 0) {
           user.shields -= 1;
@@ -143,7 +142,10 @@ client.on("messageCreate", async (message) => {
     if (Date.now() - user.last < 3000) return;
     user.last = Date.now();
 
-    user.messagesToday++;
+    // ✅ LIMITE A 20
+    if (user.messagesToday < 20) {
+      user.messagesToday++;
+    }
 
     await user.save();
 
@@ -152,7 +154,7 @@ client.on("messageCreate", async (message) => {
   }
 });
 
-// 🔥 SISTEMA AUTOMÁTICO (CADA 1 HORA)
+// 🔥 SISTEMA AUTOMÁTICO (1 HORA)
 setInterval(async () => {
   try {
     const now = Date.now();
@@ -185,7 +187,7 @@ setInterval(async () => {
   } catch (err) {
     console.error("❌ AUTO STREAK ERROR:", err);
   }
-}, 60 * 60 * 1000); // ✅ 1 hora
+}, 60 * 60 * 1000); // ⏱️ 1 hora
 
 // ⚡ COMANDOS
 client.on("interactionCreate", async (i) => {
