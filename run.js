@@ -152,15 +152,14 @@ client.on("messageCreate", async (message) => {
   }
 });
 
-// 🔥 SISTEMA AUTOMÁTICO OPTIMIZADO
+// 🔥 SISTEMA AUTOMÁTICO (CADA 1 HORA)
 setInterval(async () => {
   try {
     const now = Date.now();
     const COOLDOWN = 1000 * 60 * 60 * 24;
 
     const users = await User.find({
-      messagesToday: { $gte: 20 },
-      lastStreakAt: { $lte: now - COOLDOWN }
+      messagesToday: { $gte: 20 }
     });
 
     if (!users.length) return;
@@ -169,21 +168,24 @@ setInterval(async () => {
 
     for (const user of users) {
 
-      user.streakDays += 1;
-      user.lastStreakAt = now;
-      user.messagesToday = 0;
+      if (!user.lastStreakAt || now - user.lastStreakAt >= COOLDOWN) {
 
-      await user.save();
+        user.streakDays += 1;
+        user.lastStreakAt = now;
+        user.messagesToday = 0;
 
-      if (canal) {
-        canal.send(`🔥 <@${user.userId}> subió automáticamente a día ${user.streakDays}`);
+        await user.save();
+
+        if (canal) {
+          canal.send(`🔥 <@${user.userId}> subió automáticamente a día ${user.streakDays}`);
+        }
       }
     }
 
   } catch (err) {
     console.error("❌ AUTO STREAK ERROR:", err);
   }
-}, 5 * 60 * 1000); // 🔥 cada 5 minutos
+}, 60 * 60 * 1000); // ✅ 1 hora
 
 // ⚡ COMANDOS
 client.on("interactionCreate", async (i) => {
@@ -200,15 +202,30 @@ client.on("interactionCreate", async (i) => {
 
       if (!data) return i.editReply("❌ Sin datos");
 
-      const remaining = data.lastStreakAt
-        ? Math.max(0, (1000 * 60 * 60 * 24) - (Date.now() - data.lastStreakAt))
-        : 0;
+      const COOLDOWN = 1000 * 60 * 60 * 24;
+
+      let remaining = 0;
+
+      if (data.lastStreakAt) {
+        remaining = Math.max(0, COOLDOWN - (Date.now() - data.lastStreakAt));
+      }
 
       const hours = Math.floor(remaining / (1000 * 60 * 60));
       const minutes = Math.floor((remaining % (1000 * 60 * 60)) / (1000 * 60));
+      const seconds = Math.floor((remaining % (1000 * 60)) / 1000);
+
+      const estado = remaining === 0
+        ? "✅ Listo para subir (puede tardar hasta 1 hora)"
+        : "⏳ En cooldown";
 
       return i.editReply(
-        `📊 ${target.username}\n🔥 Día: ${data.streakDays}\n💬 ${data.messagesToday}/20\n🛡️ Escudos: ${data.shields}\n⏳ Cooldown: ${hours}h ${minutes}m`
+        `📊 ${target.username}\n\n` +
+        `🔥 Día: ${data.streakDays}\n` +
+        `💬 ${data.messagesToday}/20\n` +
+        `🛡️ Escudos: ${data.shields}\n` +
+        `⏳ Cooldown: ${hours}h ${minutes}m ${seconds}s\n\n` +
+        `${estado}\n` +
+        `ℹ️ El bot revisa automáticamente cada 1 hora`
       );
     }
 
