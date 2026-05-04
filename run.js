@@ -35,9 +35,8 @@ const userSchema = new mongoose.Schema({
   streakDays: { type: Number, default: 1 },
   last: { type: Number, default: 0 },
   lastDay: { type: String, default: "" },
-  locked: { type: Boolean, default: false },
   shields: { type: Number, default: 0 },
-  lastStreakAt: { type: Number, default: 0 } // 🔥 NUEVO
+  lastStreakAt: { type: Number, default: 0 }
 });
 
 const User = mongoose.model("User", userSchema);
@@ -51,7 +50,7 @@ const client = new Client({
   ]
 });
 
-// 🛡️ CLAVES EN MEMORIA
+// 🛡️ CLAVES
 const shieldKeys = {};
 
 // 🔧 COMANDOS
@@ -90,7 +89,7 @@ const commands = [
 
 const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
 
-// 🔥 REGISTRO
+// 🔥 READY
 client.once("clientReady", async () => {
   console.log(`🤖 Bot listo como ${client.user.tag}`);
 
@@ -125,7 +124,7 @@ client.on("messageCreate", async (message) => {
       });
     }
 
-    // 🔄 RESET DIARIO (solo mensajes + escudos)
+    // 🔄 RESET DIARIO
     if (user.lastDay !== today) {
 
       if (user.messagesToday < 20) {
@@ -137,7 +136,6 @@ client.on("messageCreate", async (message) => {
       }
 
       user.messagesToday = 0;
-      user.locked = false;
       user.lastDay = today;
     }
 
@@ -145,32 +143,7 @@ client.on("messageCreate", async (message) => {
     if (Date.now() - user.last < 3000) return;
     user.last = Date.now();
 
-    if (user.locked) return;
-
     user.messagesToday++;
-
-    // 🔥 COOLDOWN 24H REAL
-    const now = Date.now();
-    const COOLDOWN = 1000 * 60 * 60 * 24;
-
-    if (user.messagesToday >= 20) {
-
-      if (now - user.lastStreakAt >= COOLDOWN) {
-
-        user.streakDays += 1;
-        user.lastStreakAt = now;
-        user.locked = true;
-
-        const canal = await client.channels.fetch(process.env.LOG_CHANNEL_ID).catch(() => null);
-        if (canal) {
-          canal.send(`🔥 ${message.author.username} subió a día ${user.streakDays}`);
-        }
-
-      } else {
-        // en cooldown
-        user.locked = true;
-      }
-    }
 
     await user.save();
 
@@ -178,6 +151,39 @@ client.on("messageCreate", async (message) => {
     console.error("❌ MESSAGE ERROR:", err);
   }
 });
+
+// 🔥 SISTEMA AUTOMÁTICO OPTIMIZADO
+setInterval(async () => {
+  try {
+    const now = Date.now();
+    const COOLDOWN = 1000 * 60 * 60 * 24;
+
+    const users = await User.find({
+      messagesToday: { $gte: 20 },
+      lastStreakAt: { $lte: now - COOLDOWN }
+    });
+
+    if (!users.length) return;
+
+    const canal = await client.channels.fetch(process.env.LOG_CHANNEL_ID).catch(() => null);
+
+    for (const user of users) {
+
+      user.streakDays += 1;
+      user.lastStreakAt = now;
+      user.messagesToday = 0;
+
+      await user.save();
+
+      if (canal) {
+        canal.send(`🔥 <@${user.userId}> subió automáticamente a día ${user.streakDays}`);
+      }
+    }
+
+  } catch (err) {
+    console.error("❌ AUTO STREAK ERROR:", err);
+  }
+}, 5 * 60 * 1000); // 🔥 cada 5 minutos
 
 // ⚡ COMANDOS
 client.on("interactionCreate", async (i) => {
