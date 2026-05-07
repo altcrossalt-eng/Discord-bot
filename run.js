@@ -41,6 +41,17 @@ const userSchema = new mongoose.Schema({
   lastStreakAt: {
     type: Number,
     default: Date.now
+  },
+
+  // 📩 avisos
+  warnedUp: {
+    type: Boolean,
+    default: false
+  },
+
+  warnedLose: {
+    type: Boolean,
+    default: false
   }
 });
 
@@ -51,7 +62,8 @@ const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.DirectMessages
   ]
 });
 
@@ -164,13 +176,16 @@ client.on("messageCreate", async (message) => {
 
         } else {
 
-          // 🔥 nunca bajar a 0
           user.streakDays = 1;
         }
       }
 
       user.messagesToday = 0;
       user.lastDay = today;
+
+      // 🔄 reset avisos
+      user.warnedUp = false;
+      user.warnedLose = false;
     }
 
     // ⛔ ANTI SPAM
@@ -191,7 +206,7 @@ client.on("messageCreate", async (message) => {
   }
 });
 
-// 🔥 AUTO STREAK
+// 🔥 AUTO STREAK + AVISOS
 setInterval(async () => {
 
   try {
@@ -200,11 +215,9 @@ setInterval(async () => {
 
     const COOLDOWN = 1000 * 60 * 60 * 24;
 
-    const users = await User.find({
-      messagesToday: { $gte: 20 }
-    });
+    const ONE_HOUR = 1000 * 60 * 60;
 
-    if (!users.length) return;
+    const users = await User.find();
 
     const canal = await client.channels
       .fetch(process.env.LOG_CHANNEL_ID)
@@ -212,18 +225,25 @@ setInterval(async () => {
 
     for (const user of users) {
 
-      // ✅ cooldown terminado
+      const remaining = Math.max(
+        0,
+        COOLDOWN - (now - user.lastStreakAt)
+      );
+
+      // 🔥 SUBIR RACHA
       if (
-        !user.lastStreakAt ||
-        now - user.lastStreakAt >= COOLDOWN
+        user.messagesToday >= 20 &&
+        remaining === 0
       ) {
 
         user.streakDays += 1;
 
         user.lastStreakAt = now;
 
-        // 🔥 reiniciar mensajes
         user.messagesToday = 0;
+
+        user.warnedUp = false;
+        user.warnedLose = false;
 
         await user.save();
 
@@ -232,6 +252,66 @@ setInterval(async () => {
           canal.send(
             `🔥 <@${user.userId}> subió automáticamente a día ${user.streakDays}`
           );
+        }
+
+        continue;
+      }
+
+      // 📩 AVISO SUBIDA
+      if (
+        user.messagesToday >= 20 &&
+        !user.warnedUp &&
+        remaining <= ONE_HOUR &&
+        remaining > 0
+      ) {
+
+        const member = await client.users
+          .fetch(user.userId)
+          .catch(() => null);
+
+        if (member) {
+
+          await member.send(
+            `🔥 Tu racha subirá en menos de 1 hora.\n⏳ Prepárate para llegar al día ${user.streakDays + 1}`
+          ).catch(() => null);
+        }
+
+        user.warnedUp = true;
+
+        await user.save();
+      }
+
+      // ⚠️ AVISO PÉRDIDA
+      if (
+        user.messagesToday < 20 &&
+        !user.warnedLose
+      ) {
+
+        const mexico = new Date(
+          new Date().toLocaleString("en-US", {
+            timeZone: "America/Mexico_City"
+          })
+        );
+
+        const hour = mexico.getHours();
+
+        // ⚠️ 11 PM México
+        if (hour === 23) {
+
+          const member = await client.users
+            .fetch(user.userId)
+            .catch(() => null);
+
+          if (member) {
+
+            await member.send(
+              `⚠️ Te falta menos de 1 hora para perder tu racha.\n💬 Llevas ${user.messagesToday}/20 mensajes`
+            ).catch(() => null);
+          }
+
+          user.warnedLose = true;
+
+          await user.save();
         }
       }
     }
