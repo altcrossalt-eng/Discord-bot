@@ -13,7 +13,8 @@ const {
   GatewayIntentBits,
   REST,
   Routes,
-  SlashCommandBuilder
+  SlashCommandBuilder,
+  Partials
 } = require("discord.js");
 
 // 🛡️ ERRORES GLOBALES
@@ -31,13 +32,33 @@ mongoose.connect(process.env.MONGO_URL)
 // 📊 USER SCHEMA
 const userSchema = new mongoose.Schema({
   userId: String,
-  messagesToday: { type: Number, default: 0 },
-  streakDays: { type: Number, default: 1 },
-  last: { type: Number, default: 0 },
-  lastDay: { type: String, default: "" },
-  shields: { type: Number, default: 0 },
 
-  // 🔥 timestamp del último aumento de racha
+  messagesToday: {
+    type: Number,
+    default: 0
+  },
+
+  streakDays: {
+    type: Number,
+    default: 1
+  },
+
+  last: {
+    type: Number,
+    default: 0
+  },
+
+  lastDay: {
+    type: String,
+    default: ""
+  },
+
+  shields: {
+    type: Number,
+    default: 0
+  },
+
+  // 🔥 último aumento
   lastStreakAt: {
     type: Number,
     default: Date.now
@@ -64,6 +85,10 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.DirectMessages
+  ],
+
+  partials: [
+    Partials.Channel
   ]
 });
 
@@ -119,7 +144,9 @@ const commands = [
 
 ].map(c => c.toJSON());
 
-const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
+const rest = new REST({
+  version: "10"
+}).setToken(process.env.TOKEN);
 
 // 🔥 READY
 client.once("clientReady", async () => {
@@ -145,9 +172,10 @@ client.on("messageCreate", async (message) => {
 
     const id = message.author.id;
 
-    const today = new Date().toLocaleDateString("en-CA", {
-      timeZone: "America/Mexico_City"
-    });
+    const today = new Date()
+      .toLocaleDateString("en-CA", {
+        timeZone: "America/Mexico_City"
+      });
 
     let user = await User.findOne({
       userId: id
@@ -164,10 +192,10 @@ client.on("messageCreate", async (message) => {
       });
     }
 
-    // 🔄 RESET DIARIO
+    // 🔄 CAMBIO DE DÍA
     if (user.lastDay !== today) {
 
-      // ⚠️ SOLO perder racha si no llegó a 20
+      // ⚠️ perder racha solo si no llegó a 20
       if (user.messagesToday < 20) {
 
         if (user.shields > 0) {
@@ -180,6 +208,7 @@ client.on("messageCreate", async (message) => {
         }
       }
 
+      // 🔄 reset diario
       user.messagesToday = 0;
       user.lastDay = today;
 
@@ -213,9 +242,11 @@ setInterval(async () => {
 
     const now = Date.now();
 
-    const COOLDOWN = 1000 * 60 * 60 * 24;
+    const COOLDOWN =
+      1000 * 60 * 60 * 24;
 
-    const ONE_HOUR = 1000 * 60 * 60;
+    const ONE_HOUR =
+      1000 * 60 * 60;
 
     const users = await User.find();
 
@@ -321,7 +352,7 @@ setInterval(async () => {
     console.error("❌ AUTO STREAK ERROR:", err);
   }
 
-}, 60 * 60 * 1000); // ⏱️ 1 hora
+}, 60 * 60 * 1000);
 
 // ⚡ COMANDOS
 client.on("interactionCreate", async (i) => {
@@ -559,29 +590,38 @@ client.on("interactionCreate", async (i) => {
       const dias =
         i.options.getInteger("dias");
 
+      const today = new Date()
+        .toLocaleDateString("en-CA", {
+          timeZone: "America/Mexico_City"
+        });
+
       await User.updateOne(
 
         { userId: target.id },
 
         {
           $set: {
-            streakDays: dias
+
+            streakDays: dias,
+
+            // 🔥 IMPORTANTE
+            lastDay: today,
+
+            // 🔥 reinicia cooldown
+            lastStreakAt: Date.now(),
+
+            // 🔥 evita reset instantáneo
+            messagesToday: 20,
+
+            warnedUp: false,
+            warnedLose: false
           },
 
           $setOnInsert: {
 
             userId: target.id,
 
-            messagesToday: 0,
-
-            shields: 0,
-
-            lastDay: new Date()
-              .toLocaleDateString("en-CA", {
-                timeZone: "America/Mexico_City"
-              }),
-
-            lastStreakAt: Date.now()
+            shields: 0
           }
         },
 
