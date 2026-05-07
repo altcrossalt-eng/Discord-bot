@@ -21,9 +21,7 @@ process.on("uncaughtException", console.error);
 process.on("unhandledRejection", console.error);
 
 // 📡 MONGO
-mongoose.connect(process.env.MONGO_URL, {
-  dbName: "rachaBot"
-})
+mongoose.connect(process.env.MONGO_URL)
 .then(() => console.log("🟢 MongoDB conectado"))
 .catch(err => {
   console.log("🔴 Mongo error:", err);
