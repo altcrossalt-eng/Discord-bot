@@ -261,6 +261,9 @@ setInterval(async () => {
         COOLDOWN - (now - user.lastStreakAt)
       );
 
+      // ⏱️ próxima revisión
+      const nextCheck = remaining <= ONE_HOUR;
+
       // 🔥 SUBIR RACHA
       if (
         user.messagesToday >= 20 &&
@@ -292,7 +295,7 @@ setInterval(async () => {
       if (
         user.messagesToday >= 20 &&
         !user.warnedUp &&
-        remaining <= ONE_HOUR &&
+        nextCheck &&
         remaining > 0
       ) {
 
@@ -384,6 +387,9 @@ client.on("interactionCreate", async (i) => {
       const COOLDOWN =
         1000 * 60 * 60 * 24;
 
+      const ONE_HOUR =
+        1000 * 60 * 60;
+
       let remaining = 0;
 
       if (data.lastStreakAt) {
@@ -418,7 +424,14 @@ client.on("interactionCreate", async (i) => {
 
       else if (data.messagesToday >= 20) {
 
-        estado = "⏳ En cooldown";
+        if (remaining <= ONE_HOUR) {
+
+          estado = "🔥 Subirá en menos de 1 hora";
+
+        } else {
+
+          estado = "⏳ En cooldown";
+        }
       }
 
       else {
@@ -604,13 +617,10 @@ client.on("interactionCreate", async (i) => {
 
             streakDays: dias,
 
-            // 🔥 IMPORTANTE
             lastDay: today,
 
-            // 🔥 reinicia cooldown
             lastStreakAt: Date.now(),
 
-            // 🔥 evita reset instantáneo
             messagesToday: 20,
 
             warnedUp: false,
