@@ -75,7 +75,7 @@ const userSchema = new mongoose.Schema({
     default: false
   },
 
-  // 🎁 última recompensa entregada
+  // 🎁 última recompensa
   lastShieldReward: {
     type: Number,
     default: 0
@@ -168,7 +168,7 @@ client.once("clientReady", async () => {
 
   console.log("✅ Slash commands registrados");
 
-  // 🎁 recompensas retroactivas
+  // 🎁 RECOMPENSAS RETROACTIVAS
   const users = await User.find();
 
   for (const user of users) {
@@ -202,7 +202,7 @@ client.once("clientReady", async () => {
       if (member) {
 
         await member.send(
-          `🎁 ¡Recompensa retroactiva!\n🔥 Alcanzaste día ${rewardLevel}\n🛡️ Tu clave:\n${key}`
+          `🎁 ¡Recompensa retroactiva!\n\n🔥 Alcanzaste día ${rewardLevel}\n🛡️ Tu clave:\n${key}`
         ).catch(() => null);
       }
     }
@@ -310,7 +310,7 @@ setInterval(async () => {
       // 🔥 SUBIR RACHA
       if (
         user.messagesToday >= 20 &&
-        remaining <= ONE_HOUR
+        remaining === 0
       ) {
 
         user.streakDays += 1;
@@ -322,8 +322,11 @@ setInterval(async () => {
         user.warnedUp = false;
         user.warnedLose = false;
 
-        // 🎁 recompensa
-        if (user.streakDays % 7 === 0) {
+        // 🎁 RECOMPENSA CADA 7 DÍAS
+        if (
+          user.streakDays % 7 === 0 &&
+          user.lastShieldReward < user.streakDays
+        ) {
 
           const key = Math.random()
             .toString(36)
@@ -345,7 +348,7 @@ setInterval(async () => {
           if (member) {
 
             await member.send(
-              `🎁 ¡Felicidades!\n🔥 Llegaste al día ${user.streakDays}\n🛡️ Tu clave:\n${key}`
+              `🎁 ¡Felicidades!\n\n🔥 Llegaste al día ${user.streakDays}\n🛡️ Tu clave:\n${key}`
             ).catch(() => null);
           }
         }
@@ -421,7 +424,6 @@ setInterval(async () => {
           await user.save();
         }
       }
-
     }
 
   } catch (err) {
@@ -471,25 +473,25 @@ client.on("interactionCreate", async (i) => {
         )
       );
 
-      if (
-        data.messagesToday >= 20 &&
-        remaining <= 1000 * 60 * 60
-      ) {
-
-        remaining = 0;
-      }
+      const visualRemaining =
+        (
+          data.messagesToday >= 20 &&
+          remaining <= 1000 * 60 * 60
+        )
+          ? 0
+          : remaining;
 
       const hours = Math.floor(
-        remaining / (1000 * 60 * 60)
+        visualRemaining / (1000 * 60 * 60)
       );
 
       const minutes = Math.floor(
-        (remaining % (1000 * 60 * 60))
+        (visualRemaining % (1000 * 60 * 60))
         / (1000 * 60)
       );
 
       const seconds = Math.floor(
-        (remaining % (1000 * 60))
+        (visualRemaining % (1000 * 60))
         / 1000
       );
 
@@ -497,7 +499,7 @@ client.on("interactionCreate", async (i) => {
 
       if (
         data.messagesToday >= 20 &&
-        remaining === 0
+        remaining <= 1000 * 60 * 60
       ) {
 
         estado = "✅ Listo para subir";
