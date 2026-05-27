@@ -8,14 +8,12 @@ app.listen(process.env.PORT || 3000, () => {
 });
 
 const mongoose = require("mongoose");
-
 const {
   Client,
   GatewayIntentBits,
   REST,
   Routes,
-  SlashCommandBuilder,
-  Partials
+  SlashCommandBuilder
 } = require("discord.js");
 
 // 🛡️ ERRORES GLOBALES
@@ -32,53 +30,17 @@ mongoose.connect(process.env.MONGO_URL)
 
 // 📊 USER SCHEMA
 const userSchema = new mongoose.Schema({
-
   userId: String,
+  messagesToday: { type: Number, default: 0 },
+  streakDays: { type: Number, default: 1 },
+  last: { type: Number, default: 0 },
+  lastDay: { type: String, default: "" },
+  shields: { type: Number, default: 0 },
 
-  messagesToday: {
-    type: Number,
-    default: 0
-  },
-
-  streakDays: {
-    type: Number,
-    default: 1
-  },
-
-  last: {
-    type: Number,
-    default: 0
-  },
-
-  lastDay: {
-    type: String,
-    default: ""
-  },
-
-  shields: {
-    type: Number,
-    default: 0
-  },
-
+  // 🔥 timestamp del último aumento de racha
   lastStreakAt: {
     type: Number,
     default: Date.now
-  },
-
-  warnedUp: {
-    type: Boolean,
-    default: false
-  },
-
-  warnedLose: {
-    type: Boolean,
-    default: false
-  },
-
-  // 🎁 última recompensa
-  lastShieldReward: {
-    type: Number,
-    default: 0
   }
 });
 
@@ -86,17 +48,10 @@ const User = mongoose.model("User", userSchema);
 
 // 🤖 BOT
 const client = new Client({
-
   intents: [
-
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-    GatewayIntentBits.DirectMessages
-  ],
-
-  partials: [
-    Partials.Channel
+    GatewayIntentBits.MessageContent
   ]
 });
 
@@ -111,19 +66,19 @@ const commands = [
     .setDescription("Ver tu estado o el de otro usuario")
     .addUserOption(o =>
       o.setName("usuario")
-       .setDescription("Usuario")
+       .setDescription("Usuario a consultar")
     ),
 
   new SlashCommandBuilder()
     .setName("tpp")
-    .setDescription("Top de rachas"),
+    .setDescription("Top de rachas sin ping"),
 
   new SlashCommandBuilder()
     .setName("giveshield")
-    .setDescription("Dar escudo")
+    .setDescription("Dar escudo con clave (admin)")
     .addUserOption(o =>
       o.setName("usuario")
-       .setDescription("Usuario")
+       .setDescription("Usuario que recibirá el escudo")
        .setRequired(true)
     ),
 
@@ -132,13 +87,13 @@ const commands = [
     .setDescription("Canjear escudo")
     .addStringOption(o =>
       o.setName("clave")
-       .setDescription("Clave")
+       .setDescription("Clave del escudo")
        .setRequired(true)
     ),
 
   new SlashCommandBuilder()
     .setName("setstreak")
-    .setDescription("Editar racha")
+    .setDescription("Editar racha de un usuario")
     .addUserOption(o =>
       o.setName("usuario")
        .setDescription("Usuario")
@@ -146,15 +101,13 @@ const commands = [
     )
     .addIntegerOption(o =>
       o.setName("dias")
-       .setDescription("Días")
+       .setDescription("Nueva racha")
        .setRequired(true)
     )
 
 ].map(c => c.toJSON());
 
-const rest = new REST({
-  version: "10"
-}).setToken(process.env.TOKEN);
+const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
 
 // 🔥 READY
 client.once("clientReady", async () => {
@@ -167,46 +120,6 @@ client.once("clientReady", async () => {
   );
 
   console.log("✅ Slash commands registrados");
-
-  // 🎁 RECOMPENSAS RETROACTIVAS
-  const users = await User.find();
-
-  for (const user of users) {
-
-    const rewardLevel =
-      Math.floor(user.streakDays / 7) * 7;
-
-    if (
-      rewardLevel >= 7 &&
-      user.lastShieldReward < rewardLevel
-    ) {
-
-      const key = Math.random()
-        .toString(36)
-        .substring(2, 10)
-        .toUpperCase();
-
-      shieldKeys[key] = {
-        userId: user.userId,
-        used: false
-      };
-
-      user.lastShieldReward = rewardLevel;
-
-      await user.save();
-
-      const member = await client.users
-        .fetch(user.userId)
-        .catch(() => null);
-
-      if (member) {
-
-        await member.send(
-          `🎁 ¡Recompensa retroactiva!\n\n🔥 Alcanzaste día ${rewardLevel}\n🛡️ Tu clave:\n${key}`
-        ).catch(() => null);
-      }
-    }
-  }
 });
 
 // 📩 MENSAJES
@@ -220,10 +133,9 @@ client.on("messageCreate", async (message) => {
 
     const id = message.author.id;
 
-    const today = new Date()
-      .toLocaleDateString("en-CA", {
-        timeZone: "America/Mexico_City"
-      });
+    const today = new Date().toLocaleDateString("en-CA", {
+      timeZone: "America/Mexico_City"
+    });
 
     let user = await User.findOne({
       userId: id
@@ -233,7 +145,6 @@ client.on("messageCreate", async (message) => {
     if (!user) {
 
       user = await User.create({
-
         userId: id,
         messagesToday: 0,
         streakDays: 1,
@@ -241,9 +152,10 @@ client.on("messageCreate", async (message) => {
       });
     }
 
-    // 🔄 CAMBIO DE DÍA
+    // 🔄 RESET DIARIO
     if (user.lastDay !== today) {
 
+      // ⚠️ SOLO perder racha si no llegó a 20
       if (user.messagesToday < 20) {
 
         if (user.shields > 0) {
@@ -252,16 +164,13 @@ client.on("messageCreate", async (message) => {
 
         } else {
 
+          // 🔥 nunca bajar a 0
           user.streakDays = 1;
         }
       }
 
       user.messagesToday = 0;
-
       user.lastDay = today;
-
-      user.warnedUp = false;
-      user.warnedLose = false;
     }
 
     // ⛔ ANTI SPAM
@@ -269,6 +178,7 @@ client.on("messageCreate", async (message) => {
 
     user.last = Date.now();
 
+    // ✅ NO pasar de 20
     if (user.messagesToday < 20) {
       user.messagesToday++;
     }
@@ -288,13 +198,13 @@ setInterval(async () => {
 
     const now = Date.now();
 
-    const COOLDOWN =
-      1000 * 60 * 60 * 24;
+    const COOLDOWN = 1000 * 60 * 60 * 24;
 
-    const ONE_HOUR =
-      1000 * 60 * 60;
+    const users = await User.find({
+      messagesToday: { $gte: 20 }
+    });
 
-    const users = await User.find();
+    if (!users.length) return;
 
     const canal = await client.channels
       .fetch(process.env.LOG_CHANNEL_ID)
@@ -302,139 +212,36 @@ setInterval(async () => {
 
     for (const user of users) {
 
-      const remaining = Math.max(
-        0,
-        COOLDOWN - (now - user.lastStreakAt)
-      );
-
-      // 🔥 SUBIR RACHA
+      // ✅ cooldown terminado
       if (
-        user.messagesToday >= 20 &&
-        remaining === 0
+        !user.lastStreakAt ||
+        now - user.lastStreakAt >= COOLDOWN
       ) {
 
         user.streakDays += 1;
 
         user.lastStreakAt = now;
 
+        // 🔥 reiniciar mensajes
         user.messagesToday = 0;
-
-        user.warnedUp = false;
-        user.warnedLose = false;
-
-        // 🎁 RECOMPENSA CADA 7 DÍAS
-        if (
-          user.streakDays % 7 === 0 &&
-          user.lastShieldReward < user.streakDays
-        ) {
-
-          const key = Math.random()
-            .toString(36)
-            .substring(2, 10)
-            .toUpperCase();
-
-          shieldKeys[key] = {
-            userId: user.userId,
-            used: false
-          };
-
-          user.lastShieldReward =
-            user.streakDays;
-
-          const member = await client.users
-            .fetch(user.userId)
-            .catch(() => null);
-
-          if (member) {
-
-            await member.send(
-              `🎁 ¡Felicidades!\n\n🔥 Llegaste al día ${user.streakDays}\n🛡️ Tu clave:\n${key}`
-            ).catch(() => null);
-          }
-        }
 
         await user.save();
 
         if (canal) {
 
           canal.send(
-            `🔥 <@${user.userId}> subió a día ${user.streakDays}`
+            `🔥 <@${user.userId}> subió automáticamente a día ${user.streakDays}`
           );
-        }
-
-        continue;
-      }
-
-      // 📩 AVISO SUBIDA
-      if (
-        user.messagesToday >= 20 &&
-        !user.warnedUp &&
-        remaining <= ONE_HOUR &&
-        remaining > 0
-      ) {
-
-        const member = await client.users
-          .fetch(user.userId)
-          .catch(() => null);
-
-        if (member) {
-
-          await member.send(
-            `🔥 Tu racha subirá en menos de 1 hora.\n⏳ Pasarás al día ${user.streakDays + 1}`
-          ).catch(() => null);
-        }
-
-        user.warnedUp = true;
-
-        await user.save();
-      }
-
-      // ⚠️ AVISO PÉRDIDA
-      if (
-        user.messagesToday < 20 &&
-        !user.warnedLose
-      ) {
-
-        const mexico = new Date(
-          new Date().toLocaleString(
-            "en-US",
-            {
-              timeZone: "America/Mexico_City"
-            }
-          )
-        );
-
-        const hour = mexico.getHours();
-
-        if (hour === 23) {
-
-          const member = await client.users
-            .fetch(user.userId)
-            .catch(() => null);
-
-          if (member) {
-
-            await member.send(
-              `⚠️ Te falta menos de 1 hora para perder tu racha.\n💬 ${user.messagesToday}/20 mensajes`
-            ).catch(() => null);
-          }
-
-          user.warnedLose = true;
-
-          await user.save();
         }
       }
     }
 
   } catch (err) {
 
-    console.error(
-      "❌ AUTO STREAK ERROR:",
-      err
-    );
+    console.error("❌ AUTO STREAK ERROR:", err);
   }
 
-}, 60 * 60 * 1000);
+}, 60 * 60 * 1000); // ⏱️ 1 hora
 
 // ⚡ COMANDOS
 client.on("interactionCreate", async (i) => {
@@ -466,40 +273,33 @@ client.on("interactionCreate", async (i) => {
       const COOLDOWN =
         1000 * 60 * 60 * 24;
 
-      let remaining = Math.max(
-        0,
-        COOLDOWN - (
-          Date.now() - data.lastStreakAt
-        )
-      );
+      let remaining = 0;
 
-      const visualRemaining =
-        (
-          data.messagesToday >= 20 &&
-          remaining <= 1000 * 60 * 60
-        )
-          ? 0
-          : remaining;
+      if (data.lastStreakAt) {
+
+        remaining = Math.max(
+          0,
+          COOLDOWN - (Date.now() - data.lastStreakAt)
+        );
+      }
 
       const hours = Math.floor(
-        visualRemaining / (1000 * 60 * 60)
+        remaining / (1000 * 60 * 60)
       );
 
       const minutes = Math.floor(
-        (visualRemaining % (1000 * 60 * 60))
-        / (1000 * 60)
+        (remaining % (1000 * 60 * 60)) / (1000 * 60)
       );
 
       const seconds = Math.floor(
-        (visualRemaining % (1000 * 60))
-        / 1000
+        (remaining % (1000 * 60)) / 1000
       );
 
       let estado = "";
 
       if (
         data.messagesToday >= 20 &&
-        remaining <= 1000 * 60 * 60
+        remaining === 0
       ) {
 
         estado = "✅ Listo para subir";
@@ -527,7 +327,9 @@ client.on("interactionCreate", async (i) => {
 
         `⏳ Cooldown: ${hours}h ${minutes}m ${seconds}s\n\n` +
 
-        `${estado}`
+        `${estado}\n` +
+
+        `ℹ️ El bot revisa automáticamente cada 1 hora`
       );
     }
 
@@ -543,8 +345,14 @@ client.on("interactionCreate", async (i) => {
         .limit(10)
         .lean();
 
-      let text =
-        "🏆 TOP DE RACHAS\n\n";
+      if (!top.length) {
+
+        return i.editReply(
+          "❌ Sin datos aún"
+        );
+      }
+
+      let text = "🏆 TOP DE RACHAS\n\n";
 
       for (let i2 = 0; i2 < top.length; i2++) {
 
@@ -554,10 +362,10 @@ client.on("interactionCreate", async (i) => {
 
         try {
 
-          const obj =
+          const userObj =
             await client.users.fetch(u.userId);
 
-          username = obj.username;
+          username = userObj.username;
 
         } catch {}
 
@@ -595,7 +403,7 @@ client.on("interactionCreate", async (i) => {
       try {
 
         await user.send(
-          `🛡️ Tu clave:\n${key}`
+          `🛡️ Tu clave: ${key}`
         );
 
       } catch {
@@ -631,7 +439,7 @@ client.on("interactionCreate", async (i) => {
       if (data.userId !== i.user.id) {
 
         return i.reply({
-          content: "❌ Esa clave no es tuya",
+          content: "❌ Esta clave no es tuya",
           ephemeral: true
         });
       }
@@ -642,7 +450,8 @@ client.on("interactionCreate", async (i) => {
           $inc: {
             shields: 1
           }
-        }
+        },
+        { upsert: true }
       );
 
       data.used = true;
@@ -670,33 +479,29 @@ client.on("interactionCreate", async (i) => {
       const dias =
         i.options.getInteger("dias");
 
-      const today = new Date()
-        .toLocaleDateString("en-CA", {
-          timeZone: "America/Mexico_City"
-        });
-
       await User.updateOne(
 
         { userId: target.id },
 
         {
           $set: {
-
-            streakDays: dias,
-
-            lastDay: today,
-
-            lastStreakAt: Date.now(),
-
-            messagesToday: 20,
-
-            warnedUp: false,
-            warnedLose: false
+            streakDays: dias
           },
 
           $setOnInsert: {
+
             userId: target.id,
-            shields: 0
+
+            messagesToday: 0,
+
+            shields: 0,
+
+            lastDay: new Date()
+              .toLocaleDateString("en-CA", {
+                timeZone: "America/Mexico_City"
+              }),
+
+            lastStreakAt: Date.now()
           }
         },
 
@@ -704,10 +509,8 @@ client.on("interactionCreate", async (i) => {
       );
 
       return i.reply({
-
         content:
-          `🔥 ${target.username} ahora tiene ${dias} días`,
-
+          `🔥 ${target.username} ahora tiene racha de ${dias} días`,
         ephemeral: true
       });
     }
